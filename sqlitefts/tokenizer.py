@@ -9,6 +9,7 @@ import sys
 from cffi import FFI
 
 SQLITE_OK = 0
+SQLITE_ABORT = 4
 SQLITE_DONE = 101
 
 ffi = FFI()

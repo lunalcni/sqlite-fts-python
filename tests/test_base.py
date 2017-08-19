@@ -28,7 +28,8 @@ class SimpleTokenizer(fts.Tokenizer):
 def c():
     c = sqlite3.connect(':memory:')
     c.row_factory = sqlite3.Row
-    return c
+    yield c
+    c.close()
 
 
 @pytest.fixture
@@ -268,3 +269,33 @@ def test_tokenizer_output(c, tokenizer_module):
                 c.execute("SELECT token, start, end, position "
                           "FROM tok1 WHERE input=?", [s]), expect):
             assert e == a
+
+
+def test_invalid_offset(c, tokenizer_module):
+    class InvalidTokenizer(fts.Tokenizer):
+        _p = re.compile(r'\w+', re.UNICODE)
+
+        def tokenize(self, text):
+            for m in self._p.finditer(text):
+                s, e = m.span()
+                t = text[s:e]
+                p = len(text[:s].encode('utf-8'))
+                # offset has to be in bytes
+                # using number of chars can lead an invalid offset
+                yield t, p, p + len(t)
+
+    contents = ['こんにちは']
+    name = 'simple'
+    inv_name = 'invalid'
+    inv_tm = fts.make_tokenizer_module(InvalidTokenizer(), debug=True)
+    fts.register_tokenizer(c, inv_name, inv_tm)
+    fts.register_tokenizer(c, name, tokenizer_module)
+    c.execute(
+        "CREATE VIRTUAL TABLE fts USING FTS3(tokenize={})".format(inv_name))
+    with pytest.raises(sqlite3.OperationalError) as e:
+        # this should fail, the tokenizer returns invalid offset
+        r = c.execute('INSERT INTO fts VALUES(?)', contents)
+    c.execute("DROP TABLE fts")
+    c.execute("CREATE VIRTUAL TABLE fts USING FTS3(tokenize={})".format(name))
+    r = c.execute('INSERT INTO fts VALUES(?)', contents)
+    assert r.rowcount == 1

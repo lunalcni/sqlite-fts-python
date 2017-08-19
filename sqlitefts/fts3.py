@@ -8,7 +8,7 @@ import struct
 import warnings
 
 from .tokenizer import (ffi, dll, get_db_from_connection, SQLITE_OK,
-                        SQLITE_DONE)
+                        SQLITE_ABORT, SQLITE_DONE)
 from .error import Error
 
 SQLITE_DBCONFIG_ENABLE_FTS3_TOKENIZER = 1004
@@ -62,7 +62,7 @@ tokenizer_modules = {}
 '''hold references to prevent GC'''
 
 
-def make_tokenizer_module(tokenizer):
+def make_tokenizer_module(tokenizer, debug=False):
     '''tokenizer module'''
     tokenizers = {}
     cursors = {}
@@ -87,13 +87,31 @@ def make_tokenizer_module(tokenizer):
         del tokenizers[tkn]
         return SQLITE_OK
 
+    if debug:
+
+        def tokenize(tokenizer, intext, inbyte):
+            def check(t, s, e):
+                inbyte[s:e].decode('utf-8')
+                return t, s, e
+
+            return iter([check(*x) for x in tokenizer.tokenize(intext)])
+    else:
+
+        def tokenize(tokenizer, intext, inbyte):
+            return tokenizer.tokenize(intext)
+
     @ffi.callback(
         'int(sqlite3_tokenizer*, const char *, int, sqlite3_tokenizer_cursor **)'
     )
     def xopen(pTokenizer, pInput, nInput, ppCursor):
         cur = ffi.new('sqlite3_tokenizer_cursor *')
         tokenizer = ffi.from_handle(pTokenizer.t)
-        tokens = tokenizer.tokenize(ffi.string(pInput).decode('utf-8'))
+        try:
+            inbyte = ffi.string(pInput)
+            tokens = tokenize(tokenizer, inbyte.decode('utf-8'), inbyte)
+        except UnicodeDecodeError as e:
+            return SQLITE_ABORT
+
         tknh = ffi.new_handle(tokens)
         cur.pTokenizer = pTokenizer
         cur.tokens = tknh
