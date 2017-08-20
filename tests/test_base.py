@@ -299,3 +299,22 @@ def test_invalid_offset(c, tokenizer_module):
     c.execute("CREATE VIRTUAL TABLE fts USING FTS3(tokenize={})".format(name))
     r = c.execute('INSERT INTO fts VALUES(?)', contents)
     assert r.rowcount == 1
+
+
+def test_offset(c, tokenizer_module):
+    contents = ('こんにちは こんばんは', 'おはよう こんにちは')
+    name = 'simple'
+    fts.register_tokenizer(c, name, tokenizer_module)
+    c.execute("CREATE VIRTUAL TABLE fts USING FTS3(text1, text2, tokenize={})".
+              format(name))
+    r = c.execute('INSERT INTO fts VALUES(?, ?)', contents)
+    assert r.rowcount == 1
+    qw = 'こんにちは'
+    r = c.execute(
+        "SELECT text1, text2, offsets(fts) FROM fts WHERE fts MATCH ?", (qw,)).fetchone()
+    t1, q1, o1, l1, t2, q2, o2, l2 = [
+        int(x) for x in r[str('offsets(fts)')].split(' ')
+    ]
+    texts = r[str('text1')], r[str('text2')]
+    assert texts[t1].encode('utf-8')[o1:o1+l1] == qw.encode('utf-8')
+    assert texts[t2].encode('utf-8')[o2:o2+l2] == qw.encode('utf-8')
